@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from .taf import TAF
 
 class DecodeError(Exception):
@@ -6,9 +7,10 @@ class DecodeError(Exception):
         self.strerror = msg
 
 class Decoder(object):
-    def __init__(self, taf):
+    def __init__(self, taf, month=None, year=None):
         if isinstance(taf, TAF):
             self._taf = taf
+            self._decode_groups(month=month, year=year)
         else:
             raise DecodeError("Argument is not a TAF parser object")
 
@@ -43,6 +45,29 @@ class Decoder(object):
 
         return(result)
 
+    def get_group(self, timestamp):
+        # return the group that contains timestamp
+        for group in self.groups:
+            if group.start_time < timestamp and timestamp < group.end_time:
+                return group
+        raise ValueError('Error identifying group for ' + timestamp.isoformat() + ' in TAF')
+            
+    def _decode_groups(self, month, year):
+        if month is None:
+            month = 1
+        if year is None:
+            year = datetime.utcnow().year
+            
+        header = self._taf.get_header()
+        self.timestamp = datetime(year, month, int(header["origin_date"]), int(header["origin_hours"]), int(header["origin_minutes"]))
+        valid_till = datetime(year, month, int(header["origin_date"]), int(header["origin_hours"]), int(header["origin_minutes"]))
+        self.groups = [TafGroup(group, month, year) for group in self._taf.get_groups()]
+        for i, group in enumerate(self.groups[:-1]):
+            nextgroup = self.groups[i+1]
+            group.end_time = nextgroup.start_time
+            # TODO: the dates may be off, because may need to iterate the month
+        self.groups[len(self.groups)].end_time = valid_till # set end time of last group
+        
     def _decode_header(self, header):
         result = ""
 
@@ -353,3 +378,27 @@ class Decoder(object):
 
         return(suffix)
         
+
+class TafGroup:
+    
+    def __init__(self, group, month, year):
+        if isinstance(group, dict):
+            self._group = group
+            print group
+            self.start_time = self._decode_from_timestamp(group["header"], month, year)
+            self.end_time = None
+            self.wind = group["wind"]
+            self.visibility = group["visibility"]
+            self.clouds = group["clouds"]
+            self.weather = group["weather"]
+            self.windshear = group["windshear"]
+            self._parse_timestamp()
+        else:
+            raise DecodeError("Argument is not a TAF parser object")
+
+    def _decode_from_timestamp(self, header, month, year):
+        print header
+        return datetime(year, month, header["from_date"], header["from_hours"], header["from_minutes"])
+        
+    def _parse_timestamp(self):
+        pass
