@@ -48,8 +48,8 @@ class Decoder(object):
     def get_group(self, timestamp):
         # return the group that contains timestamp
         for group in self.groups:
-            print timestamp, group
-            if group.start_time < timestamp and timestamp < group.end_time:
+            if group.start_time <= timestamp and timestamp < group.end_time:
+                print timestamp, group
                 return group
         raise ValueError('Error identifying group for ' + timestamp.isoformat() + ' in TAF')
 
@@ -94,6 +94,21 @@ class Decoder(object):
 
         valid_till = self._decode_timestamp(taf_header, 'valid_till_')
         self.groups[-1].end_time = valid_till # set end time of last group
+
+        self._complete_group_info()
+
+    def _complete_group_info(self):
+        # When PROB40, TEMPO, and BECMG are listed in the group header, this means that
+        # components from the previous group are not expected to change in the group. Identify these cases,
+        # and make sure each group contains complete information
+        temp_keywords = ['PROB', 'TEMPO', 'BECMG']
+        for index, group in enumerate(self.groups[1:]):
+            if not group.header_starts_with(temp_keywords):
+                continue
+
+            # incorporate missing info from previous group
+            prev_group = self.groups[index - 1]
+            group.fill_in_information(prev_group)
         
     def _decode_header(self, header):
         result = ""
@@ -416,19 +431,35 @@ class TafGroup:
 
         self._group = group
 
-        header = group['header']
-        if not header:
-            header = default_header
-        self.start_time = decoder._decode_timestamp(header, 'from_', 'valid_from_')
+        self.header = group['header']
+        if not self.header:
+            self.header = default_header
+        self.start_time = decoder._decode_timestamp(self.header, 'from_', 'valid_from_')
         self.end_time = None
 
-        self.forecast = {}
         for attr in self.ATTRIBUTES:
-            self._decode_attribute(attr)
-            self.forecast.update(getattr(self, attr))
+            self._decode_attribute(attr)         
+        self._set_forecast()
 
     def get_attributes(self):
         return ['wind', 'visibility', 'clouds', 'weather', 'windshear']
+
+    def header_starts_with(self, keys):
+        for key in keys:
+            if self.header["type"].startswith(key):
+                return True
+        return False
+
+    def fill_in_information(self, other_group):
+        for attr in self.ATTRIBUTES:
+            value = getattr(self, attr)
+            if not value:
+                setattr(self, attr, getattr(other_group, attr))
+
+    def _set_forecast(self):
+        self.forecast = {}
+        for attr in self.ATTRIBUTES:
+            self.forecast.update(getattr(self, attr))
 
     def _to_value(self, value, unit):
         return str(value) + ' ' + unit
