@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from .taf import TAF
 
 class DecodeError(Exception):
@@ -48,25 +48,52 @@ class Decoder(object):
     def get_group(self, timestamp):
         # return the group that contains timestamp
         for group in self.groups:
+            print timestamp, group
             if group.start_time < timestamp and timestamp < group.end_time:
                 return group
         raise ValueError('Error identifying group for ' + timestamp.isoformat() + ' in TAF')
-            
+
+    def _extract_time(self, header, *prefixes):
+        if not header:
+            raise ValueError('Expecting non-empty header')
+        
+        for prefix in prefixes:
+            if header.get(prefix + 'date', None):
+                day = int(header.get(prefix + 'date'))
+                hour = int(header.get(prefix + 'hours'))
+                minute = int(header.get(prefix + 'minutes', 0))
+                return day, hour, minute
+        raise ValueError('No time corresponding to prefixes: %s found in header: %s' % (prefixes, header))
+        
+    def _decode_timestamp(self, header, *prefixes):
+        day, hours, minutes = self._extract_time(header, *prefixes)
+        if hours == 24:
+            hours = 23
+            minutes = 59
+        
+        month = self.issued_timestamp.month
+        if self.issued_timestamp.day > day:
+            month = self.issued_timestamp.month + 1
+        return self.issued_timestamp.replace(month = month, day = day, hour = hours, minute = minutes)
+        
     def _decode_groups(self, month, year):
         if month is None:
             month = 1
         if year is None:
             year = datetime.utcnow().year
             
-        header = self._taf.get_header()
-        self.timestamp = datetime(year, month, int(header["origin_date"]), int(header["origin_hours"]), int(header["origin_minutes"]))
-        valid_till = datetime(year, month, int(header["origin_date"]), int(header["origin_hours"]), int(header["origin_minutes"]))
-        self.groups = [TafGroup(group, month, year) for group in self._taf.get_groups()]
+        taf_header = self._taf.get_header()
+        day, hours, minutes = self._extract_time(taf_header, 'origin_')
+        self.issued_timestamp = datetime(year, month, day, hours, minutes)
+        
+        self.groups = [TafGroup(group, taf_header, self) for group in self._taf.get_groups()]
         for i, group in enumerate(self.groups[:-1]):
             nextgroup = self.groups[i+1]
             group.end_time = nextgroup.start_time
             # TODO: the dates may be off, because may need to iterate the month
-        self.groups[len(self.groups)].end_time = valid_till # set end time of last group
+
+        valid_till = self._decode_timestamp(taf_header, 'valid_till_')
+        self.groups[-1].end_time = valid_till # set end time of last group
         
     def _decode_header(self, header):
         result = ""
@@ -380,25 +407,78 @@ class Decoder(object):
         
 
 class TafGroup:
+
+    ATTRIBUTES = ['wind', 'visibility', 'clouds', 'weather', 'windshear']
     
-    def __init__(self, group, month, year):
-        if isinstance(group, dict):
-            self._group = group
-            print group
-            self.start_time = self._decode_from_timestamp(group["header"], month, year)
-            self.end_time = None
-            self.wind = group["wind"]
-            self.visibility = group["visibility"]
-            self.clouds = group["clouds"]
-            self.weather = group["weather"]
-            self.windshear = group["windshear"]
-            self._parse_timestamp()
-        else:
+    def __init__(self, group, default_header, decoder):
+        if not isinstance(group, dict):
             raise DecodeError("Argument is not a TAF parser object")
 
-    def _decode_from_timestamp(self, header, month, year):
-        print header
-        return datetime(year, month, header["from_date"], header["from_hours"], header["from_minutes"])
+        self._group = group
+
+        header = group['header']
+        if not header:
+            header = default_header
+        self.start_time = decoder._decode_timestamp(header, 'from_', 'valid_from_')
+        self.end_time = None
+
+        self.forecast = {}
+        for attr in self.ATTRIBUTES:
+            self._decode_attribute(attr)
+            self.forecast.update(getattr(self, attr))
+
+    def get_attributes(self):
+        return ['wind', 'visibility', 'clouds', 'weather', 'windshear']
+
+    def _to_value(self, value, unit):
+        return str(value) + ' ' + unit
+
+    def _decode_attribute(self, attr):
+        methodToCall = getattr(self, '_decode_' + attr)
+        methodToCall()
+
+    def _decode_visibility(self):
+        vis = self._group.get('visibility', None)
+        if not vis:
+            self.visibility = {}
+        else:
+            self.visibility = {'visibility': self._to_value(vis['range'], vis['unit'])}
         
-    def _parse_timestamp(self):
-        pass
+    def _decode_wind(self):
+        wind = self._group.get('wind', None)
+        data = {'wind_none': 'TRUE'}
+        if not wind or wind['direction'] == "000":
+            self.wind = data
+            return
+        
+        data['wind_none'] = "FALSE"
+        if wind["direction"] == "VRB":
+            data['wind_dir'] = -1
+        else:
+            data['wind_dir'] = wind["direction"]
+        data['wind_speed'] = wind["speed"] + ' ' + wind["unit"]
+        if wind['gust']:
+            data['wind_gust'] = wind['gust'] + ' ' + wind["unit"]
+
+        self.wind = data
+
+    def _decode_clouds(self):
+        clouds = self._group.get('clouds', None)
+        self.clouds = {}
+
+    def _decode_weather(self):
+        weather = self._group.get('weather', None)
+        self.weather = {}
+
+    def _decode_windshear(self):
+        windshear = self._group.get('windshear', None)
+        self.windshear = {}
+
+    def __str__(self):
+        rep = ''
+        if self.start_time:
+            rep += self.start_time.strftime('%d %H:%M-') + self.end_time.strftime('%H:%M ')
+        else:
+            rep += 'None '
+        rep += str(self.forecast)
+        return rep
