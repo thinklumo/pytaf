@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timedelta
+import logging
 from .taf import TAF
 
 class DecodeError(Exception):
@@ -49,9 +50,10 @@ class Decoder(object):
         # return the group that contains timestamp
         for group in self.groups:
             if group.start_time <= timestamp and timestamp < group.end_time:
-                print timestamp, group
+#                print timestamp, group
                 return group
-        raise ValueError('Error identifying group for ' + timestamp.isoformat() + ' in TAF')
+        logging.warning('No group found for timestamp' + timestamp.isoformat())
+        return None
 
     def _extract_time(self, header, *prefixes):
         if not header:
@@ -419,6 +421,15 @@ class Decoder(object):
             suffix = "rd"
 
         return(suffix)
+
+## translation of the present-weather codes into english
+WEATHER_INT = {
+    "-": "light",
+    "+": "heavy",
+    "-VC": "nearby light",
+    "+VC": "nearby heavy",
+    "VC": "nearby"
+}
         
 
 class TafGroup:
@@ -461,19 +472,35 @@ class TafGroup:
         for attr in self.ATTRIBUTES:
             self.forecast.update(getattr(self, attr))
 
-    def _to_value(self, value, unit):
-        return str(value) + ' ' + unit
-
     def _decode_attribute(self, attr):
         methodToCall = getattr(self, '_decode_' + attr)
         methodToCall()
+
+    def _decode_range(self, range_str):
+        if ' ' in range_str:
+            a, rem = range_str.split(' ')
+            a = int(a)
+        else:
+            a = 0
+            rem = range_str
+
+        if '/' in rem:
+            num, denom = rem.split('/')
+            b = float(num) / int(denom)
+        else:
+            b = int(rem)
+
+        result = a + b
+        return result
+            
 
     def _decode_visibility(self):
         vis = self._group.get('visibility', None)
         if not vis:
             self.visibility = {}
         else:
-            self.visibility = {'visibility': self._to_value(vis['range'], vis['unit'])}
+            range = self._decode_range(vis['range'])
+            self.visibility = {'visibility' + vis['unit']: range}
         
     def _decode_wind(self):
         wind = self._group.get('wind', None)
@@ -487,23 +514,44 @@ class TafGroup:
             data['wind_dir'] = -1
         else:
             data['wind_dir'] = wind["direction"]
-        data['wind_speed'] = wind["speed"] + ' ' + wind["unit"]
+        data['wind_speed_' + wind['unit']] = wind["speed"]
         if wind['gust']:
-            data['wind_gust'] = wind['gust'] + ' ' + wind["unit"]
+            data['wind_gust_' + wind['unit']] = wind['gust']
 
         self.wind = data
 
     def _decode_clouds(self):
         clouds = self._group.get('clouds', None)
-        self.clouds = {}
+        data = {}
+        if clouds:
+            data['clouds_num_layers'] = len(clouds)
+            layer = clouds[0]
+            data['clouds'] = layer["layer"]
+            if not layer["layer"] in ["SKC", "CLR", "NSC", "CAVOK", "CAVU"]:
+                data['clouds_type'] = layer["type"]
+                data['clouds_ceiling_ft'] = int(layer["ceiling"])*100
+            
+        self.clouds = data
 
     def _decode_weather(self):
         weather = self._group.get('weather', None)
-        self.weather = {}
+        data = {}
+        if weather:
+            wx = weather[0]
+            for key in ['modifier', 'phenomenon']:
+                data['wx_' + key] = wx.get(key, None)
+            if 'intensity' in wx:
+                data['wx_intensity'] = WEATHER_INT.get(wx.get(key))
+        self.weather = data
 
     def _decode_windshear(self):
         windshear = self._group.get('windshear', None)
-        self.windshear = {}
+        data = {}
+        if windshear:
+            data['windshear_alt_ft'] = int(windshear["altitude"])*100
+            data['windshear_dir'] = windshear["direction"]
+            data['windshear_speed_' + windshear['unit']] = windshear["speed"]
+        self.windshear = data
 
     def __str__(self):
         rep = ''
