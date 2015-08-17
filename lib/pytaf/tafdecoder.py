@@ -1,3 +1,4 @@
+from calendar import monthrange
 import re
 from datetime import datetime, timedelta
 import logging
@@ -71,12 +72,23 @@ class Decoder(object):
         day, hours, minutes = self._extract_time(header, *prefixes)
         if hours == 24:
             hours = 23
-            minutes = 59
+            minutes = 59            
         
         month = self.issued_timestamp.month
         if self.issued_timestamp.day > day:
-            month = self.issued_timestamp.month + 1
+            month = ((self.issued_timestamp.month + 1) % 12) + 1
+        month, day = self._normalize_date(self.issued_timestamp.year, month, day)
+                
         return self.issued_timestamp.replace(month = month, day = day, hour = hours, minute = minutes)
+
+    def _normalize_date(self, year, month, day):
+        if day == 31:
+            # Check if this month does not have 31 days, and change to valid date. This error occurs in the data.
+            days_in_month = monthrange(year, month)[1]
+            if days_in_month == 30:
+                day = 1
+                month += 1
+        return month, day
         
     def _decode_groups(self, month, year):
         if month is None:
@@ -86,6 +98,7 @@ class Decoder(object):
             
         taf_header = self._taf.get_header()
         day, hours, minutes = self._extract_time(taf_header, 'origin_')
+        month, day = self._normalize_date(year, month, day)
         self.issued_timestamp = datetime(year, month, day, hours, minutes)
         
         self.groups = [TafGroup(group, taf_header, self) for group in self._taf.get_groups()]
