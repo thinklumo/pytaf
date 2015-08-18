@@ -1,7 +1,9 @@
 from calendar import monthrange
+import copy
 import re
 from datetime import datetime, timedelta
 import logging
+from operator import attrgetter
 from .taf import TAF
 
 class DecodeError(Exception):
@@ -51,7 +53,6 @@ class Decoder(object):
         # return the group that contains timestamp
         for group in self.groups:
             if group.start_time <= timestamp and timestamp < group.end_time:
-#                print timestamp, group
                 return group
         logging.warning('No group found for timestamp' + timestamp.isoformat())
         return None
@@ -61,25 +62,34 @@ class Decoder(object):
             raise ValueError('Expecting non-empty header')
         
         for prefix in prefixes:
-            if header.get(prefix + 'date', None):
-                day = int(header.get(prefix + 'date'))
+            day = header.get(prefix + 'date', None)
+            if day:
+                day = int(day)
                 hour = int(header.get(prefix + 'hours'))
                 minute = int(header.get(prefix + 'minutes', 0))
                 return day, hour, minute
-        raise ValueError('No time corresponding to prefixes: %s found in header: %s' % (prefixes, header))
+        return None
         
     def _decode_timestamp(self, header, *prefixes):
-        day, hours, minutes = self._extract_time(header, *prefixes)
+        res = self._extract_time(header, *prefixes)
+        if not res:
+            return None
+
+        day, hours, minutes = res
         if hours == 24:
             hours = 23
             minutes = 59            
         
         month = self.issued_timestamp.month
+        year = self.issued_timestamp.year
         if self.issued_timestamp.day > day:
-            month = ((self.issued_timestamp.month + 1) % 12) + 1
-        month, day = self._normalize_date(self.issued_timestamp.year, month, day)
+            month = self.issued_timestamp.month + 1
+        if month > 12:
+            month = 1
+            year += 1
+        month, day = self._normalize_date(year, month, day)
                 
-        return self.issued_timestamp.replace(month = month, day = day, hour = hours, minute = minutes)
+        return datetime(year, month, day, hours, minutes)
 
     def _normalize_date(self, year, month, day):
         if day == 31:
@@ -100,17 +110,51 @@ class Decoder(object):
         day, hours, minutes = self._extract_time(taf_header, 'origin_')
         month, day = self._normalize_date(year, month, day)
         self.issued_timestamp = datetime(year, month, day, hours, minutes)
-        
+
+#        print self._taf._raw_taf
         self.groups = [TafGroup(group, taf_header, self) for group in self._taf.get_groups()]
+#        print 'Initial groups', self.groups
+        newgroups = []
         for i, group in enumerate(self.groups[:-1]):
             nextgroup = self.groups[i+1]
-            group.end_time = nextgroup.start_time
-            # TODO: the dates may be off, because may need to iterate the month
+            if not group.end_time:
+                if group.type == 'FM' or group.type == 'MAIN':
+                    group.end_time = nextgroup.start_time
+                else:
+                    logging.warning('Group does not have an end time' + str(groups))
+            if self._has_gap(group.end_time, nextgroup.start_time):
+                newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time))
+        self.groups.extend(newgroups)
+        self.groups = sorted(self.groups, key=attrgetter('start_time'))
 
-        valid_till = self._decode_timestamp(taf_header, 'valid_till_')
-        self.groups[-1].end_time = valid_till # set end time of last group
-
+        self._set_final_group_endtime()
+        self._fill_in_gaps()
         self._complete_group_info()
+#        print 'Final groups:', self.groups
+
+    def _set_final_group_endtime(self):
+        valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
+        if not self.groups[-1].end_time:
+            if self.groups[-1].type == 'FM' or self.groups[-1].type == 'MAIN':
+                self.groups[-1].end_time = valid_till # set end time of last group
+            else:
+                print 'WARNING: end time should already be listed', self.groups[-1]
+
+    def _has_gap(self, earliertime, latertime):
+        return latertime - earliertime > timedelta(hours=0.5)
+
+    def _create_basic_group(self, startime, endtime):
+        newgroup = copy.copy(self.groups[0])
+        newgroup.start_time = startime
+        newgroup.end_time = endtime
+        newgroup.type = 'MAIN-EXT'
+        return newgroup
+    
+    def _fill_in_gaps(self):
+        # If the last group is not a FM group, extend the main group (1st group)
+        valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
+        if self._has_gap(self.groups[-1].end_time, valid_till):
+            self.groups.append( self._create_basic_group(self.groups[-1].end_time, valid_till))
 
     def _complete_group_info(self):
         # When PROB40, TEMPO, and BECMG are listed in the group header, this means that
@@ -458,8 +502,10 @@ class TafGroup:
         self.header = group['header']
         if not self.header:
             self.header = default_header
+        self.type = self.header["type"]
+        
         self.start_time = decoder._decode_timestamp(self.header, 'from_', 'valid_from_')
-        self.end_time = None
+        self.end_time = decoder._decode_timestamp(self.header, 'till_')
 
         for attr in self.ATTRIBUTES:
             self._decode_attribute(attr)         
@@ -566,11 +612,19 @@ class TafGroup:
             data['windshear_speed_' + windshear['unit']] = windshear["speed"]
         self.windshear = data
 
+    def __repr__(self):
+        return self.__str__()
+
     def __str__(self):
         rep = ''
         if self.start_time:
-            rep += self.start_time.strftime('%d %H:%M-') + self.end_time.strftime('%H:%M ')
+            rep += self.start_time.strftime('%d %H:%M-')
+        else:
+            rep += 'None-'
+        if self.end_time:
+            rep += self.end_time.strftime('%H:%M ')
         else:
             rep += 'None '
-        rep += str(self.forecast)
+        rep += self.type + ' '
+        #rep += str(self.forecast)
         return rep

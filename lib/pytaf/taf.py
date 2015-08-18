@@ -83,9 +83,12 @@ class TAF(object):
         """
 
         header = re.match(taf_header_pattern, string, re.VERBOSE)
+
         
         if header:
-            return header.groupdict()
+            header = header.groupdict()
+            header["type"] = "MAIN"
+            return header
         else:
             raise MalformedTAF("No valid TAF header found")
 
