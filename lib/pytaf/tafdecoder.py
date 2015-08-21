@@ -54,7 +54,9 @@ class Decoder(object):
         for group in self.groups:
             if group.start_time <= timestamp and timestamp < group.end_time:
                 return group
-        logging.warning('No group found for timestamp' + timestamp.isoformat())
+        print self.groups
+        print '[WARNING] No group found for timestamp', timestamp.isoformat()
+        #logging.warning('No group found for timestamp' + timestamp.isoformat())
         return None
 
     def _extract_time(self, header, *prefixes):
@@ -141,7 +143,7 @@ class Decoder(object):
                 print 'WARNING: end time should already be listed', self.groups[-1]
 
     def _has_gap(self, earliertime, latertime):
-        return latertime - earliertime > timedelta(hours=0.5)
+        return latertime - earliertime > timedelta(minutes=5)
 
     def _create_basic_group(self, startime, endtime):
         newgroup = copy.copy(self.groups[0])
