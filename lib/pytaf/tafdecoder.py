@@ -11,10 +11,10 @@ class DecodeError(Exception):
         self.strerror = msg
 
 class Decoder(object):
-    def __init__(self, taf, month=None, year=None):
+    def __init__(self, taf, taf_timestamp):
         if isinstance(taf, TAF):
             self._taf = taf
-            self._decode_groups(month=month, year=year)
+            self._decode_groups(taf_timestamp)
         else:
             raise DecodeError("Argument is not a TAF parser object")
 
@@ -54,9 +54,8 @@ class Decoder(object):
         for group in self.groups:
             if group.start_time <= timestamp and timestamp < group.end_time:
                 return group
-        print self.groups
+        #print self.groups
         print '[WARNING] No group found for timestamp', timestamp.isoformat()
-        #logging.warning('No group found for timestamp' + timestamp.isoformat())
         return None
 
     def _extract_time(self, header, *prefixes):
@@ -102,11 +101,11 @@ class Decoder(object):
                 month += 1
         return month, day
         
-    def _decode_groups(self, month, year):
-        if month is None:
-            month = 1
-        if year is None:
-            year = datetime.utcnow().year
+    def _decode_groups(self, taf_timestamp):
+        if not taf_timestamp:
+            taf_timestamp = datetime.utcnow()
+        month = taf_timestamp.month
+        year = taf_timestamp.year
             
         taf_header = self._taf.get_header()
         day, hours, minutes = self._extract_time(taf_header, 'origin_')
@@ -132,7 +131,7 @@ class Decoder(object):
         self._set_final_group_endtime()
         self._fill_in_gaps()
         self._complete_group_info()
-#        print 'Final groups:', self.groups
+        #print 'Final groups:', self.groups
 
     def _set_final_group_endtime(self):
         valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
