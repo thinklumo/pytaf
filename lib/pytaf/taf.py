@@ -323,7 +323,7 @@ class TAF(object):
             
     def get_taf(self):
         """ Return raw TAF string the object was initialized with """
-        return self.__raw_taf
+        return self._raw_taf
 
     def get_header(self):
         """ Return header dict """
@@ -336,3 +336,6 @@ class TAF(object):
     def get_maintenance(self):
         """ Return station maintenance indicator """
         return(self._maintenance)
+
+    def __repr__(self):
+        return self.get_taf()

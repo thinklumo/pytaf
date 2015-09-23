@@ -72,9 +72,8 @@ class Decoder(object):
                     minute = 0
                 minute = int(minute)
 
-                if hour > 24:
+                if hour > 24: # There are occasionally data errors,
                     hour = int(header.get('valid_from_hours'))
-                    print('[WARNING] Invalid ', prefixes, 'timestamp. Using hour=', hour, self._taf)
 
                 return day, hour, minute
         return None
@@ -130,10 +129,11 @@ class Decoder(object):
                 if group.type == 'FM' or group.type == 'MAIN':
                     group.end_time = nextgroup.start_time
                 else:
-                    logging.warning('Group does not have an end time' + str(groups))
+                    logging.warning('Group does not have an end time' + str(self.groups))
             if self._has_gap(group.end_time, nextgroup.start_time):
                 newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time))
         self.groups.extend(newgroups)
+
         self.groups = sorted(self.groups, key=attrgetter('start_time'))
 
         self._set_final_group_endtime()
@@ -513,7 +513,7 @@ class TafGroup:
             self.header = default_header
         self.type = self.header["type"]
         
-        self.start_time = decoder._decode_timestamp(self.header, 'from_', 'valid_from_')
+        self.start_time = decoder._decode_timestamp(self.header, 'from_', 'valid_from_', 'origin_')
         self.end_time = decoder._decode_timestamp(self.header, 'till_')
 
         for attr in self.ATTRIBUTES:
