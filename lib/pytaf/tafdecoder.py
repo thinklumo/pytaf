@@ -96,7 +96,6 @@ class Decoder(object):
             month = 1
             year += 1
         month, day = self._normalize_date(year, month, day)
-                
         return datetime(year, month, day, hours, minutes)
 
     def _normalize_date(self, year, month, day):
