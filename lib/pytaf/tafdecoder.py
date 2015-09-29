@@ -3,12 +3,15 @@ import copy
 import re
 from datetime import datetime, timedelta
 import logging
+import math
 from operator import attrgetter
 from .taf import TAF
+
 
 class DecodeError(Exception):
     def __init__(self, msg):
         self.strerror = msg
+
 
 class Decoder(object):
     def __init__(self, taf, taf_timestamp):
@@ -52,7 +55,12 @@ class Decoder(object):
     def get_group(self, timestamp):
         # return the group that contains timestamp
         for group in self.groups:
-            if group.start_time <= timestamp and timestamp < group.end_time:
+            end_time = group.end_time
+            if not end_time:
+                end_time = group.start_time + timedelta(hours=1)
+                logging.warning('No end time in group' + str(group))
+
+            if group.start_time <= timestamp < end_time:
                 return group
         #print(self.groups)
         print('[WARNING] No group found for timestamp', timestamp.isoformat())
@@ -122,15 +130,18 @@ class Decoder(object):
         self.groups = [TafGroup(group, taf_header, self) for group in self._taf.get_groups()]
 #        print('Initial groups', self.groups)
         newgroups = []
+        prev_fm_group = self.groups[0]
         for i, group in enumerate(self.groups[:-1]):
             nextgroup = self.groups[i+1]
             if not group.end_time:
                 if group.type == 'FM' or group.type == 'MAIN':
                     group.end_time = nextgroup.start_time
+                    prev_fm_group = group
                 else:
                     logging.warning('Group does not have an end time' + str(self.groups))
+                    group.end_time = nextgroup.start_time # TODO: investigate when this occurs
             if self._has_gap(group.end_time, nextgroup.start_time):
-                newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time))
+                newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time, prev_fm_group))
         self.groups.extend(newgroups)
 
         self.groups = sorted(self.groups, key=attrgetter('start_time'))
@@ -138,7 +149,15 @@ class Decoder(object):
         self._set_final_group_endtime()
         self._fill_in_gaps()
         self._complete_group_info()
-        #print('Final groups:', self.groups)
+        self._remove_extraneous_groups()
+        #print('Final groups:', taf_timestamp.isoformat(), self.groups)
+
+    def _remove_extraneous_groups(self):
+        """
+        Remove groups that span no time. This can occur with the interplay of TEMPO and PROB groups with FM groups.
+        :return:
+        """
+        self.groups = [x for x in self.groups if x.start_time < x.end_time]
 
     def _set_final_group_endtime(self):
         valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
@@ -151,31 +170,34 @@ class Decoder(object):
     def _has_gap(self, earliertime, latertime):
         return latertime - earliertime > timedelta(minutes=5)
 
-    def _create_basic_group(self, startime, endtime):
-        newgroup = copy.copy(self.groups[0])
-        newgroup.start_time = startime
+    def _create_basic_group(self, startime, endtime, base_group):
+        newgroup = copy.copy(base_group)
+        if startime.minute == 59:
+            newgroup.start_time = startime + timedelta(minutes=1)
+        else:
+            newgroup.start_time = startime
         newgroup.end_time = endtime
-        newgroup.type = 'MAIN-EXT'
+        newgroup.type = base_group.type + '-EXT'
         return newgroup
     
     def _fill_in_gaps(self):
         # If the last group is not a FM group, extend the main group (1st group)
         valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
         if self._has_gap(self.groups[-1].end_time, valid_till):
-            self.groups.append( self._create_basic_group(self.groups[-1].end_time, valid_till))
+            self.groups.append( self._create_basic_group(self.groups[-1].end_time, valid_till, self.groups[0]))
 
     def _complete_group_info(self):
         # When PROB40, TEMPO, and BECMG are listed in the group header, this means that
         # components from the previous group are not expected to change in the group. Identify these cases,
         # and make sure each group contains complete information
         temp_keywords = ['PROB', 'TEMPO', 'BECMG']
+        prev_fm_group = self.groups[0]
         for index, group in enumerate(self.groups[1:]):
-            if not group.header_starts_with(temp_keywords):
-                continue
+            if group.header_starts_with(temp_keywords):
+                group.fill_in_information(prev_fm_group)
+            else:
+                prev_fm_group = group
 
-            # incorporate missing info from previous group
-            prev_group = self.groups[index - 1]
-            group.fill_in_information(prev_group)
         
     def _decode_header(self, header):
         result = ""
@@ -516,10 +538,11 @@ class TafGroup:
         self.end_time = decoder._decode_timestamp(self.header, 'till_')
 
         for attr in self.ATTRIBUTES:
-            self._decode_attribute(attr)         
+            self._decode_attribute(attr)
         self._set_forecast()
 
-    def get_attributes(self):
+    @staticmethod
+    def get_attributes():
         return ['wind', 'visibility', 'clouds', 'weather', 'windshear']
 
     def header_starts_with(self, keys):
@@ -530,14 +553,21 @@ class TafGroup:
 
     def fill_in_information(self, other_group):
         for attr in self.ATTRIBUTES:
-            value = getattr(self, attr)
+            value = getattr(self, attr, None)
             if not value:
                 setattr(self, attr, getattr(other_group, attr))
+        self._set_forecast()
 
     def _set_forecast(self):
         self.forecast = {}
+        prob = self._get_prob()
+        if prob:
+            self.forecast['prob'] = prob
         for attr in self.ATTRIBUTES:
-            self.forecast.update(getattr(self, attr))
+            self.forecast.update(getattr(self, attr, {}))
+
+    def _get_prob(self):
+        return self.header.get('probability', None)
 
     def _decode_attribute(self, attr):
         methodToCall = getattr(self, '_decode_' + attr)
@@ -560,28 +590,37 @@ class TafGroup:
         result = a + b
         return result
             
-
     def _decode_visibility(self):
         vis = self._group.get('visibility', None)
         if not vis:
             self.visibility = {}
         else:
             range = self._decode_range(vis['range'])
-            self.visibility = {'visibility' + vis['unit']: range}
+            self.visibility = {'visibility_' + vis['unit']: range}
         
     def _decode_wind(self):
         wind = self._group.get('wind', None)
-        data = {'wind_none': 'TRUE'}
-        if not wind or wind['direction'] == "000":
-            self.wind = data
+        if not wind:
             return
-        
-        data['wind_none'] = "FALSE"
+
+        if wind['direction'] == "000":
+            self.wind = {'wind': 0}
+            return
+
+        data = {'wind': 1}
+
+        wind_speed = int(wind["speed"])
+        data['wind_speed_' + wind['unit']] = wind_speed
+
         if wind["direction"] == "VRB":
             data['wind_dir'] = -1
         else:
-            data['wind_dir'] = wind["direction"]
-        data['wind_speed_' + wind['unit']] = wind["speed"]
+            wind_dir = int(wind["direction"])
+            data['wind_dir'] = wind_dir
+            wind_rad = math.radians(int(wind_dir))
+            data['wind_crosswind_cos'] = wind_speed * math.cos(wind_rad)
+            data['wind_crosswind_sin'] = wind_speed * math.sin(wind_rad)
+
         if wind['gust']:
             data['wind_gust_' + wind['unit']] = wind['gust']
 
