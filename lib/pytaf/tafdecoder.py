@@ -17,7 +17,10 @@ class Decoder(object):
     def __init__(self, taf, taf_timestamp):
         if isinstance(taf, TAF):
             self._taf = taf
-            self._decode_groups(taf_timestamp)
+            try:
+                self._decode_groups(taf_timestamp)
+            except ValueError:
+                logging.warning('Error decoding taf: ' + taf._raw_taf)
         else:
             raise DecodeError("Argument is not a TAF parser object")
 
@@ -56,9 +59,6 @@ class Decoder(object):
         # return the group that contains timestamp
         for group in self.groups:
             end_time = group.end_time
-            if not end_time:
-                end_time = group.start_time + timedelta(hours=1)
-                logging.warning('No end time in group' + str(group))
 
             if group.start_time <= timestamp < end_time:
                 return group
@@ -74,6 +74,9 @@ class Decoder(object):
             day = header.get(prefix + 'date', None)
             if day:
                 day = int(day)
+                if day == 0:
+                    logging.warning('Invalid day for taf ' + self._taf._raw_taf)
+                    return None
                 hour = int(header.get(prefix + 'hours'))
                 minute = header.get(prefix + 'minutes', 0)
                 if minute == '':
@@ -87,7 +90,11 @@ class Decoder(object):
         return None
         
     def _decode_timestamp(self, header, *prefixes):
-        res = self._extract_time(header, *prefixes)
+        try:
+            res = self._extract_time(header, *prefixes)
+        except ValueError:
+            return None
+
         if not res:
             return None
 
@@ -95,7 +102,7 @@ class Decoder(object):
         if hours == 24:
             hours = 23
             minutes = 59
-        
+
         month = self.issued_timestamp.month
         year = self.issued_timestamp.year
         if self.issued_timestamp.day > day:
@@ -103,8 +110,12 @@ class Decoder(object):
         if month > 12:
             month = 1
             year += 1
-        month, day = self._normalize_date(year, month, day)
+        try:
+            month, day = self._normalize_date(year, month, day)
+        except ValueError:
+            return None
         return datetime(year, month, day, hours, minutes)
+
 
     def _normalize_date(self, year, month, day):
         if day == 31:
@@ -126,28 +137,9 @@ class Decoder(object):
         month, day = self._normalize_date(year, month, day)
         self.issued_timestamp = datetime(year, month, day, hours, minutes)
 
-#        print(self._taf._raw_taf)
         self.groups = [TafGroup(group, taf_header, self) for group in self._taf.get_groups()]
-#        print('Initial groups', self.groups)
-        newgroups = []
-        prev_fm_group = self.groups[0]
-        for i, group in enumerate(self.groups[:-1]):
-            nextgroup = self.groups[i+1]
-            if not group.end_time:
-                if group.type == 'FM' or group.type == 'MAIN':
-                    group.end_time = nextgroup.start_time
-                    prev_fm_group = group
-                else:
-                    logging.warning('Group does not have an end time' + str(self.groups))
-                    group.end_time = nextgroup.start_time # TODO: investigate when this occurs
-            if self._has_gap(group.end_time, nextgroup.start_time):
-                newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time, prev_fm_group))
-        self.groups.extend(newgroups)
-
-        self.groups = sorted(self.groups, key=attrgetter('start_time'))
-
-        self._set_final_group_endtime()
-        self._fill_in_gaps()
+        self._set_missing_group_times()
+        self._fill_gaps()
         self._complete_group_info()
         self._remove_extraneous_groups()
         #print('Final groups:', taf_timestamp.isoformat(), self.groups)
@@ -159,13 +151,16 @@ class Decoder(object):
         """
         self.groups = [x for x in self.groups if x.start_time < x.end_time]
 
-    def _set_final_group_endtime(self):
-        valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
-        if not self.groups[-1].end_time:
-            if self.groups[-1].type == 'FM' or self.groups[-1].type == 'MAIN':
-                self.groups[-1].end_time = valid_till # set end time of last group
-            else:
-                print('WARNING: end time should already be listed', self.groups[-1])
+    def _set_missing_group_times(self):
+        for index, group in enumerate(self.groups):
+            if not group.start_time and index > 0:
+                group.start_time = self.groups[index-1].end_time
+
+            if not group.end_time and index < len(self.groups)-1:
+                group.end_time = self.groups[index+1].start_time
+            elif not group.end_time and (group.type == 'FM' or group.type == 'MAIN'):
+                valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
+                group.end_time = valid_till # set end time of last group
 
     def _has_gap(self, earliertime, latertime):
         return latertime - earliertime > timedelta(minutes=5)
@@ -179,8 +174,25 @@ class Decoder(object):
         newgroup.end_time = endtime
         newgroup.type = base_group.type + '-EXT'
         return newgroup
-    
-    def _fill_in_gaps(self):
+
+    def _fill_gaps(self):
+        newgroups = []
+        prev_fm_group = self.groups[0]
+        for i, group in enumerate(self.groups[:-1]):
+            nextgroup = self.groups[i+1]
+            if group.type == 'FM' or group.type == 'MAIN':
+                prev_fm_group = group
+            if not group.end_time:
+                logging.warning('Group does not have an end time' + str(self.groups))
+                group.end_time = nextgroup.start_time # TODO: investigate when this occurs
+            if self._has_gap(group.end_time, nextgroup.start_time):
+                newgroups.append( self._create_basic_group(group.end_time, nextgroup.start_time, prev_fm_group))
+        self.groups.extend(newgroups)
+        self.groups = sorted(self.groups, key=attrgetter('start_time'))
+
+        self._fill_gap_at_end()
+
+    def _fill_gap_at_end(self):
         # If the last group is not a FM group, extend the main group (1st group)
         valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
         if self._has_gap(self.groups[-1].end_time, valid_till):
@@ -589,7 +601,7 @@ class TafGroup:
 
         result = a + b
         return result
-            
+
     def _decode_visibility(self):
         vis = self._group.get('visibility', None)
         if not vis:
