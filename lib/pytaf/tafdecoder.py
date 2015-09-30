@@ -58,13 +58,22 @@ class Decoder(object):
     def get_group(self, timestamp):
         # return the group that contains timestamp
         for group in self.groups:
-            end_time = group.end_time
-
-            if group.start_time <= timestamp < end_time:
+            if group.start_time <= timestamp < group.end_time:
                 return group
+
+        if self.groups[-1].end_time == timestamp:
+            return group
         #print(self.groups)
-        print('[WARNING] No group found for timestamp', timestamp.isoformat())
+        print('[WARNING] No TAF group found for ', timestamp.isoformat(), self.groups)
         return None
+
+    @property
+    def end_time(self):
+        return self.groups[-1].end_time
+
+    @property
+    def start_time(self):
+        return self.groups[0].start_time
 
     def _extract_time(self, header, *prefixes):
         if not header:
@@ -161,6 +170,9 @@ class Decoder(object):
             elif not group.end_time and (group.type == 'FM' or group.type == 'MAIN'):
                 valid_till = self._decode_timestamp(self._taf.get_header(), 'valid_till_')
                 group.end_time = valid_till # set end time of last group
+
+            if index == len(self.groups)-1 and group.end_time.minute == 59:
+                group.end_time = group.end_time + timedelta(minutes=1)
 
     def _has_gap(self, earliertime, latertime):
         return latertime - earliertime > timedelta(minutes=5)
