@@ -85,7 +85,7 @@ class Decoder(object):
                 day = int(day)
                 if day == 0:
                     logging.warning('Invalid day for taf ' + self._taf._raw_taf)
-                    return None
+                    raise ValueError('Invalid day for taf' + self._taf._raw_taf)
                 hour = int(header.get(prefix + 'hours'))
                 minute = header.get(prefix + 'minutes', 0)
                 if minute == '':
