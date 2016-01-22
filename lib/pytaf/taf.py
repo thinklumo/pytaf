@@ -61,7 +61,7 @@ class TAF(object):
 
         taf_header_pattern = """
             ^
-            TAF*    # TAF header (at times missing or duplicate)
+            (TAF\s?)*    # TAF header (at times missing or duplicate)
             \s+
             (?P<type> (COR|AMD|RTD)){0,1} # Corrected/Amended/Delayed
              
