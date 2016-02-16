@@ -646,7 +646,7 @@ class TafGroup:
             data['wind_crosswind_sin'] = wind_speed * math.sin(wind_rad)
 
         if wind['gust']:
-            data['wind_gust_' + wind['unit']] = wind['gust']
+            data['wind_gust_' + wind['unit']] = int(wind['gust'])
 
         self.wind = data
 
@@ -679,8 +679,8 @@ class TafGroup:
         data = {}
         if windshear:
             data['windshear_alt_ft'] = int(windshear["altitude"])*100
-            data['windshear_dir'] = windshear["direction"]
-            data['windshear_speed_' + windshear['unit']] = windshear["speed"]
+            data['windshear_dir'] = int(windshear["direction"])
+            data['windshear_speed_' + windshear['unit']] = int(windshear["speed"])
         self.windshear = data
 
     def __repr__(self):
