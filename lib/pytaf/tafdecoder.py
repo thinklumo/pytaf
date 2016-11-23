@@ -627,6 +627,11 @@ class TafGroup:
         else:
             range = self._decode_range(vis['range'])
             self.visibility = {'visibility_' + vis['unit']: range}
+
+        vv = self._group.get('vertical_visibility', None)
+        if vv:
+            self.visibility['visibility_vertical_ft'] = int(vv)
+
         
     def _decode_wind(self):
         wind = self._group.get('wind', None)
@@ -640,16 +645,18 @@ class TafGroup:
         data['wind_speed_' + wind['unit']] = wind_speed
 
         if wind["direction"] == "VRB":
-            data['wind_dir'] = -1
+            data['wind_dir_variable'] = 1
         else:
             wind_dir = int(wind["direction"])
             data['wind_dir'] = wind_dir
-            wind_rad = math.radians(int(wind_dir))
+            wind_rad = math.radians(wind_dir)
             data['wind_crosswind_cos'] = round(wind_speed * math.cos(wind_rad), 2)
             data['wind_crosswind_sin'] = round(wind_speed * math.sin(wind_rad), 2)
 
         if wind['gust']:
-            data['wind_gust_' + wind['unit']] = int(wind['gust'])
+            wind_gust_speed = int(wind['gust'])
+            data['wind_gust_' + wind['unit']] = wind_gust_speed
+            data['wind_gust_diff_' + wind['unit']] =  wind_gust_speed - wind_speed
 
         self.wind = data
 

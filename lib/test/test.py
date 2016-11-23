@@ -103,7 +103,7 @@ class TafTests(unittest.TestCase):
         self.assertEquals(self.group.forecast, {
             'wind': 1, 'wind_dir': 310, 'windshear': 0,
             'wind_speed_KT': 11, 'wind_gust_KT': 17,
-            'wind_crosswind_cos': 7.07, 'wind_crosswind_sin': -8.43,
+            'wind_crosswind_cos': 7.07, 'wind_crosswind_sin': -8.43, 'wind_gust_diff_KT': 6,
             'clouds_num_layers': 0, 'sky_clear': 1,
             'visibility_SM': 6, 'weather': 0,
             })
@@ -149,4 +149,25 @@ class TafTests(unittest.TestCase):
             'weather': 1, 'wx_intensity_light': 1, 'wx_phenomenon_SN': 1, 'wx_phenomenon_PL': 1,
             'windshear': 0,
             'visibility_SM': 3,
+        })
+
+    def test_vertical_visibility(self):
+        self.raw_taf = """
+        TAF KMSP 272329Z 2800/2906 12008KT 2SM -SNPL BR OVC007 FM280500
+                       VRB03KT 1 1/2SM -FZDZ BR OVC006 FM280900
+                       VRB03KT 1 1/2SM BR OVC004
+                      TEMPO 2810/2814 1/2SM FZFG VV002 FM281700
+                       17005KT 5SM BR SCT004 OVC008 FM290400 13004KT
+                       3SM -FZRA BR OVC005
+        """
+
+        self.timestamp = datetime(2013, 1, 27, 23, 29)
+        self.parse_taf()
+
+        self.group = self.taf.get_group(datetime(2013, 1, 28, 10, 30))
+        self.assertEquals(self.group.forecast, {
+            'wind': 1, 'wind_dir_variable': 1, 'wind_speed_KT': 3, 'windshear': 0,
+            'weather': 1, 'wx_modifier_FZ': 1, 'wx_phenomenon_FG': 1,
+            'visibility_vertical_ft': 2, 'visibility_SM': 0.5,
+            'clouds_layer_OVC': 1, 'clouds_ceiling_ft': 4, 'clouds_num_layers': 1,
         })

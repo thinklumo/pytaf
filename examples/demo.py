@@ -17,9 +17,8 @@ t = pytaf.TAF(taf_str)
 
 d = pytaf.Decoder(t)
 
-print taf_str
-print
+print(taf_str)
 dec = d.decode_taf()
 
-print dec
+print(dec)
 
