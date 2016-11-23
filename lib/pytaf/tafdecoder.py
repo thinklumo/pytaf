@@ -578,15 +578,21 @@ class TafGroup:
     def fill_in_information(self, other_group):
         for attr in self.ATTRIBUTES:
             value = getattr(self, attr, None)
-            if not value or not value.get(attr):
-                setattr(self, attr, getattr(other_group, attr))
+            if not value or value.get(attr) == 0:
+                setattr(self, attr, getattr(other_group, attr)) # override attr
+            elif self.header['type'].startswith('PROB'):
+                current_values = getattr(self, attr)
+                for key,value in getattr(other_group, attr).items(): # override higher-probability values
+                    if key not in current_values or self.forecast.get('prob', 100) < 50:
+                        current_values[key] = value
+
         self._set_forecast()
 
     def _set_forecast(self):
         self.forecast = {}
         prob = self._get_prob()
         if prob:
-            self.forecast['prob'] = prob
+            self.forecast['prob'] = int(prob)
         for attr in self.ATTRIBUTES:
             self.forecast.update(getattr(self, attr, {}))
 
@@ -639,8 +645,8 @@ class TafGroup:
             wind_dir = int(wind["direction"])
             data['wind_dir'] = wind_dir
             wind_rad = math.radians(int(wind_dir))
-            data['wind_crosswind_cos'] = wind_speed * math.cos(wind_rad)
-            data['wind_crosswind_sin'] = wind_speed * math.sin(wind_rad)
+            data['wind_crosswind_cos'] = round(wind_speed * math.cos(wind_rad), 2)
+            data['wind_crosswind_sin'] = round(wind_speed * math.sin(wind_rad), 2)
 
         if wind['gust']:
             data['wind_gust_' + wind['unit']] = int(wind['gust'])

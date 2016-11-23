@@ -35,7 +35,6 @@ class TafTests(unittest.TestCase):
         self.assertEqual(self.group.weather, expected_weather)
         self.assertEqual(self.group.clouds, expected_clouds)
 
-    @unittest.skip('temporary ignore')
     def test_combound_weather(self):
         self.raw_taf = """
         TAF KMSP 212348Z 2200/2306 11010KT P6SM BKN250 FM220600 11011KT
@@ -89,6 +88,65 @@ class TafTests(unittest.TestCase):
         self.group = self.taf.get_group(datetime(2016, 11, 24, 5, 55))
         self.assertWeatherEquals(set_weather(), set_clouds())
 
+    def test_wind_gusts(self):
+        self.raw_taf = """
+        TAF KEWR 230232Z 2303/2406 30012G18KT P6SM BKN040 FM230400 30011G17KT
+          P6SM SCT040 FM230600 29009KT P6SM SCT040 FM231400 31011G17KT
+          P6SM SKC FM240200 34005KT P6SM BKN250=
+        :return:
+        """
 
+        self.timestamp = datetime(2016, 11, 23, 2, 32)
+        self.parse_taf()
 
+        self.group = self.taf.get_group(datetime(2016, 11, 23, 14, 35))
+        self.assertEquals(self.group.forecast, {
+            'wind': 1, 'wind_dir': 310, 'windshear': 0,
+            'wind_speed_KT': 11, 'wind_gust_KT': 17,
+            'wind_crosswind_cos': 7.07, 'wind_crosswind_sin': -8.43,
+            'clouds_num_layers': 0, 'sky_clear': 1,
+            'visibility_SM': 6, 'weather': 0,
+            })
 
+    def test_tempo_section(self):
+        self.raw_taf = """
+        TAF KIAH 230259Z 2303/2406 16010KT P6SM VCSH FEW028 SCT050 BKN250 FM230900
+          18007KT P6SM -RA VCTS SCT015 BKN035CB
+         TEMPO 2311/2314 TSRA FM231600 32010KT P6SM SCT250 FM240000
+          34004KT P6SM SKC=
+        :return:
+        """
+        self.timestamp = datetime(2016, 11, 23, 2, 59)
+        self.parse_taf()
+
+        self.group = self.taf.get_group(datetime(2016, 11, 23, 12, 0))
+        self.assertEquals(self.group.forecast, {
+            'clouds_type_CB': 1, 'clouds_num_layers': 2, 'clouds_layer_BKN': 1, 'clouds_ceiling_max_ft': 35,
+            'clouds_layer_SCT': 1, 'clouds_ceiling_ft': 15,
+            'wind': 1, 'wind_crosswind_cos': -7.0, 'wind_dir': 180, 'wind_crosswind_sin': 0.0, 'wind_speed_KT': 7,
+            'windshear': 0,
+            'visibility_SM': 6,
+            'weather': 1, 'wx_phenomenon_RA': 1, 'wx_modifier_TS': 1
+        })
+
+    def test_prob_forecast(self):
+        self.raw_taf = """
+        TAF KMSP 212111Z 2121/2224 11011KT P6SM BKN250 FM220400 11011KT P6SM
+          SCT080 BKN110 FM221000 11012KT P6SM -SN SCT035 BKN050
+          FM221200 11014KT 3SM -SN SCT020 OVC035
+         PROB30 2212/2215 4SM -SNPL OVC020 FM221500 11014G20KT
+          2SM -SNPL SCT009 OVC020 FM221800 11014G20KT 2SM -SNRA
+          OVC009="""
+        self.timestamp = datetime(2016, 11, 21, 11, 11)
+        self.parse_taf()
+
+        self.group = self.taf.get_group(datetime(2016, 11, 22, 13, 10))
+        self.assertEquals(self.group.forecast, {
+            'prob': 30,
+            'clouds_ceiling_ft': 20, 'clouds_layer_SCT': 1, 'clouds_ceiling_max_ft': 35,
+            'clouds_num_layers': 2, 'clouds_layer_OVC': 1,
+            'wind': 1, 'wind_dir': 110, 'wind_speed_KT': 14, 'wind_crosswind_sin': 13.16, 'wind_crosswind_cos': -4.79,
+            'weather': 1, 'wx_intensity_light': 1, 'wx_phenomenon_SN': 1, 'wx_phenomenon_PL': 1,
+            'windshear': 0,
+            'visibility_SM': 3,
+        })
