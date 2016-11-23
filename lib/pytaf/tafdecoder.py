@@ -402,99 +402,99 @@ class Decoder(object):
 
         for group in weather:
             # Special cases
-            if group["intensity"] == "+" and group["phenomenon"] == "FC":
+            if "+" in group and "FC" in group:
                 i_result += "tornado or watersprout"
                 list.append(i_result)
                 continue
 
-            if group["modifier"] == "MI":
+            if "MI" in group:
                 ii_result += "shallow "
-            elif group["modifier"] == "BC":
+            elif "BC" in group:
                 ii_result += "patchy "
-            elif group["modifier"] == "DR":
+            elif "DR" in group:
                 ii_result += "low drifting "
-            elif group["modifier"] == "BL":
+            elif "BL" in group:
                 ii_result += "blowing "
-            elif group["modifier"] == "SH":
+            elif "SH" in group:
                 ii_result += "showers "
-            elif group["modifier"] == "TS":
+            elif "TS" in group:
                 ii_result += "thunderstorms "
-            elif group["modifier"] == "FZ":
+            elif "FZ" in group:
                 ii_result += "freezing "
-            elif group["modifier"] == "PR":
+            elif "PR" in group:
                 ii_result = "partial "
 
-            if group["phenomenon"] == "DZ":
+            if "DZ" in group:
                 ii_result += "drizzle"
-            if group["phenomenon"] == "RA":
+            if "RA" in group:
                 ii_result += "rain"
-            if group["phenomenon"] == "SN":
+            if "SN" in group:
                 ii_result += "snow"
-            if group["phenomenon"] == "SG":
+            if "SG" in group:
                 ii_result += "snow grains"
-            if group["phenomenon"] == "IC":
+            if "IC" in group:
                 ii_result += "ice"
-            if group["phenomenon"] == "PL":
+            if "PL" in group:
                 ii_result += "ice pellets"
-            if group["phenomenon"] == "GR":
+            if "GR" in group:
                 ii_result += "hail"
-            if group["phenomenon"] == "GS":
+            if "GS" in group:
                 ii_result += "small snow/hail pellets"
-            if group["phenomenon"] == "UP":
+            if "UP" in group:
                 ii_result += "unknown precipitation"
-            if group["phenomenon"] == "BR":
+            if "BR" in group:
                 ii_result += "mist"
-            if group["phenomenon"] == "FG":
+            if "FG" in group:
                 ii_result += "fog"
-            if group["phenomenon"] == "FU":
+            if "FU" in group:
                 ii_result += "smoke"
-            if group["phenomenon"] == "DU":
+            if "DU" in group:
                 ii_result += "dust"
-            if group["phenomenon"] == "SA":
+            if "SA" in group:
                 ii_result += "sand"
-            if group["phenomenon"] == "HZ":
+            if "HZ" in group:
                 ii_result += "haze"
-            if group["phenomenon"] == "PY":
+            if "PY" in group:
                 ii_result += "spray"
-            if group["phenomenon"] == "VA":
+            if "VA" in group:
                 ii_result += "volcanic ash"
-            if group["phenomenon"] == "PO":
+            if "PO" in group:
                 ii_result += "dust/sand whirl"
-            if group["phenomenon"] == "SQ":
+            if "SQ" in group:
                 ii_result += "squall"
-            if group["phenomenon"] == "FC":
+            if "FC" in group:
                 ii_result += "funnel cloud"
-            if group["phenomenon"] == "SS":
+            if "SS" in group:
                 ii_result += "sand storm"
-            if group["phenomenon"] == "DS":
+            if "DS" in group:
                 ii_result += "dust storm"
 
             # Fix the most ugly grammar
-            if group["modifier"] == "SH" and group["phenomenon"] == "RA":
+            if "SH" in group and "RA" in group:
                 ii_result = "showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "SN":
+            if "SH" in group and "SN" in group:
                 ii_result = "snow showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "SG":
+            if "SH" in group and "SG" in group:
                 ii_result = "snow grain showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "PL":
+            if "SH" in group and "PL" in group:
                 ii_result = "ice pellet showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "IC":
+            if "SH" in group and "IC" in group:
                 ii_result = "ice showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "GS":
+            if "SH" in group and "GS" in group:
                 ii_result = "snow pellet showers"
-            if group["modifier"] == "SH" and group["phenomenon"] == "GR":
+            if "SH" in group and "GR" in group:
                 ii_result = "hail showers"
 
-            if group["modifier"] == "TS" and group["phenomenon"] == "RA":
+            if "TS" in group and "RA" in group:
                 ii_result = "thunderstorms and rain"
-            if group["modifier"] == "TS" and group["phenomenon"] == "UP":
+            if "TS" in group and "UP" in group:
                 ii_result = "thunderstorms with unknown precipitation"
 
-            if group["intensity"] == "+":
+            if "+" in group:
                 i_result = "heavy %s" % ii_result
-            elif group["intensity"] == "-":
+            elif "-" in group:
                 i_result = "light %s" % ii_result
-            elif group["intensity"] == "VC":
+            elif "VC" in group:
                 i_result = "%s in the vicinity" % ii_result
             else:
                 i_result = ii_result
@@ -578,7 +578,7 @@ class TafGroup:
     def fill_in_information(self, other_group):
         for attr in self.ATTRIBUTES:
             value = getattr(self, attr, None)
-            if not value:
+            if not value or not value.get(attr):
                 setattr(self, attr, getattr(other_group, attr))
         self._set_forecast()
 
@@ -624,10 +624,7 @@ class TafGroup:
         
     def _decode_wind(self):
         wind = self._group.get('wind', None)
-        if not wind:
-            return
-
-        if wind['direction'] == "000":
+        if not wind or wind['direction'] == "000":
             self.wind = {'wind': 0}
             return
 
@@ -652,36 +649,59 @@ class TafGroup:
 
     def _decode_clouds(self):
         clouds = self._group.get('clouds', None)
-        data = {}
-        if clouds:
-            data['clouds_num_layers'] = len(clouds)
-            layer = clouds[0]
-            data['clouds'] = layer["layer"]
-            if not layer["layer"] in ["SKC", "CLR", "NSC", "CAVOK", "CAVU"]:
-                data['clouds_type'] = layer["type"]
-                data['clouds_ceiling_ft'] = int(layer["ceiling"])*100
+        if not clouds:
+            self.clouds = {}
+            return
+
+        if clouds[0]['layer'] in ["SKC", "CLR", "NSC", "CAVOK", "CAVU"]:
+            self.clouds = {'sky_clear': 1, 'clouds_num_layers': 0}
+            return
+
+        data = {'clouds_num_layers': len(clouds)}
+        for layer in clouds:
+            for key,value in layer.items():
+                if not value:
+                    continue
+                if key in ['layer', 'type']:
+                    data['clouds_%s_%s' % (key, value)] = 1
+                elif key == 'ceiling':
+                    if 'clouds_ceiling_ft' not in data:
+                        data['clouds_ceiling_ft'] = int(value)
+                    else:
+                        data['clouds_ceiling_max_ft'] = int(value)
             
         self.clouds = data
 
     def _decode_weather(self):
-        weather = self._group.get('weather', None)
-        data = {}
-        if weather:
-            wx = weather[0]
-            for key in ['modifier', 'phenomenon']:
-                data['wx_' + key] = wx.get(key, None)
-            if 'intensity' in wx:
-                data['wx_intensity'] = WEATHER_INT.get(wx.get(key))
+        weather = self._group.get('weather')
+        if not weather:
+            self.weather = {'weather': 0}
+            return
+
+        data = {'weather': 1}
+        for wx in weather:
+            for key, value in wx.items():
+                if value == 'weather':
+                    continue # Skipping the full weather string because it's represented in intensity, weather, and phenom
+                elif value == 'intensity':
+                    key = WEATHER_INT.get(key, None)
+                if key:
+                    data['wx_%s_%s' % (value, key)] = 1
+
         self.weather = data
 
     def _decode_windshear(self):
         windshear = self._group.get('windshear', None)
-        data = {}
-        if windshear:
-            data['windshear_alt_ft'] = int(windshear["altitude"])*100
-            data['windshear_dir'] = int(windshear["direction"])
-            data['windshear_speed_' + windshear['unit']] = int(windshear["speed"])
-        self.windshear = data
+        if not windshear:
+            self.windshear = {'windshear': 0}
+            return
+
+        self.windshear = {
+            'windshear': 1,
+            'windshear_alt_ft': windshear["altitude"],
+            'windshear_dir': int(windshear["direction"]),
+            'windshear_speed_' + windshear['unit']: int(windshear["speed"])
+        }
 
     def __repr__(self):
         return self.__str__()

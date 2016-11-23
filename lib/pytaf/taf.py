@@ -1,4 +1,13 @@
 import re
+import logging
+
+_modifiers = ['MI', 'BC', 'DR', 'BL', 'SH', 'TS', 'FZ', 'PR' ]
+_phenomena = ['DZ', 'RA', 'SN', 'SG', 'IC', 'PL', 'GR', 'GS', 'UP', 'BR', 'FG', 'FU', 'DU', 'SA', 'HZ', 'PY', 'VA',
+              'PO', 'SQ', 'FC', 'SS', 'DS']
+
+
+WEATHER_PATTERNS = dict(zip(_modifiers, ['modifier']*len(_modifiers)))
+WEATHER_PATTERNS.update( dict(zip(_phenomena, ['phenomenon']*len(_phenomena))))
 
 class MalformedTAF(Exception):
     def __init__(self, msg):
@@ -26,6 +35,8 @@ class TAF(object):
         self._maintenance = None
 
         if isinstance(string, str) and string != "":
+            # strip out white space and =
+            string = string.strip().strip('=')
             self._raw_taf = string
         else:
             raise MalformedTAF("TAF string expected")
@@ -272,27 +283,33 @@ class TAF(object):
         # So we first search for words that look like weather descriptors,
         # then analyze them in detail.
         # If there is a better way, it should be used here instead of this hack.
-
         weather_word_pattern = """
           (?<= \s )
           ( (?: \+|\-|VC|MI|BC|DR|BL|SH|TS|FZ|PR|DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|DU|SA|HZ|PY|VA|PO|SQ|FC|SS|DS)+ )
           (?= \s|$)
         """
-
-        weather_pattern = """
-            (?P<intensity> \+|\-|VC ){0,1}
-            (?P<modifier> MI|BC|DR|BL|SH|TS|FZ|PR ){0,1}
-            (?P<phenomenon> DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|DU|SA|HZ|PY|VA|PO|SQ|FC|SS|DS ){0,1}
-        """
-        
-        weather = []
-
         weather_words = re.findall(weather_word_pattern, string, re.VERBOSE)
-        for word in weather_words:
-            parsed_word = re.search(weather_pattern, word, re.VERBOSE)
-            weather.append(parsed_word.groupdict())
 
-        return(weather)
+        weather = []
+        for word in weather_words:
+            weather.append(self._parse_weather_phenomena_str(word))
+        return weather
+
+    def _parse_weather_phenomena_str(self, weather_str):
+        # First parse the intensity, which may or may not be present:
+        viscinity_pattern = re.compile("^(?P<intensity>[\+|\-|VC]{0,2})(?P<remainder>\w+)$")
+        m = viscinity_pattern.match(weather_str)
+        if not m:
+            logging.warning('Unable to parse weather viscinity %s', weather_str)
+
+        intensity = m.group('intensity')
+        remainder = m.group('remainder')
+        wx_parts = [remainder[i:i + 2] for i in range(0, len(remainder), 2)] # split into 2-character chunks
+
+        results = {x: WEATHER_PATTERNS.get(x, None) for x in wx_parts}
+        results[intensity] = 'intensity'
+        results[weather_str] = 'weather'
+        return results
 
     def _parse_wind_shear(self, string):
         wind_shear_pattern = """
