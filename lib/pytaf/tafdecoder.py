@@ -711,7 +711,7 @@ class TafGroup:
 
         self.windshear = {
             'windshear': 1,
-            'windshear_alt_ft': windshear["altitude"],
+            'windshear_alt_ft': int(windshear["altitude"]),
             'windshear_dir': int(windshear["direction"]),
             'windshear_speed_' + windshear['unit']: int(windshear["speed"])
         }
