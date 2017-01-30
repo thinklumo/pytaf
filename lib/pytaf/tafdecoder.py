@@ -635,7 +635,7 @@ class TafGroup:
         
     def _decode_wind(self):
         wind = self._group.get('wind', None)
-        if not wind or wind['direction'] == "000":
+        if not wind:
             self.wind = {'wind': 0}
             return
 
@@ -646,7 +646,7 @@ class TafGroup:
 
         if wind["direction"] == "VRB":
             data['wind_dir_variable'] = 1
-        else:
+        else: # If wind is calm, direction will be 0, but crosswind will be 0 too because wind speed is 0
             wind_dir = int(wind["direction"])
             data['wind_dir'] = wind_dir
             wind_rad = math.radians(wind_dir)
@@ -680,8 +680,8 @@ class TafGroup:
                 elif key == 'ceiling':
                     if 'clouds_ceiling_ft' not in data:
                         data['clouds_ceiling_ft'] = int(value)
-                    else:
-                        data['clouds_ceiling_max_ft'] = int(value)
+                    current_max_ft = data.get('clouds_ceiling_max_ft', int(value))
+                    data['clouds_ceiling_max_ft'] = max(int(value), current_max_ft)
             
         self.clouds = data
 
